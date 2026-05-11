@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자율좌석 예약 현황</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .seat-card { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+        .seat-card:hover { transform: translateY(-4px); }
+        .status-badge { @apply px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-900">
+    <div class="max-w-6xl mx-auto px-4 py-12">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+            <div>
+                <h1 class="text-4xl font-extrabold tracking-tight text-slate-900">
+                    <span class="text-blue-600">Smart</span> Desk
+                </h1>
+                <p class="text-slate-500 mt-1">자율좌석 예약 시스템</p>
+            </div>
+            <div class="flex gap-4 bg-white p-2 rounded-2xl shadow-sm border border-slate-100">
+                <div class="px-4 py-2 text-center">
+                    <p id="total-count" class="text-xl font-bold text-slate-800">0</p>
+                    <p class="text-[10px] text-slate-400 uppercase">전체</p>
+                </div>
+                <div class="w-px bg-slate-100"></div>
+                <div class="px-4 py-2 text-center">
+                    <p id="available-count" class="text-xl font-bold text-blue-600">0</p>
+                    <p class="text-[10px] text-slate-400 uppercase">이용가능</p>
+                </div>
+                <div class="w-px bg-slate-100"></div>
+                <div class="px-4 py-2 text-center">
+                    <p id="expiring-count" class="text-xl font-bold text-orange-500">0</p>
+                    <p class="text-[10px] text-slate-400 uppercase">곧 비움</p>
+                </div>
+            </div>
+        </header>
+
+        <!-- 좌석 현황 섹션 -->
+        <div id="seat-grid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
+            <!-- 로딩 상태 -->
+            <div class="col-span-full text-center py-20">
+                <i class="fas fa-circle-notch animate-spin text-4xl text-blue-500"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- 예약 모달 -->
+    <div id="reserve-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl transform transition-all scale-100">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 id="modal-title" class="text-2xl font-bold text-slate-800">좌석 예약</h2>
+                    <p class="text-slate-500 text-sm mt-1">이름과 사번을 입력해주세요.</p>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 uppercase mb-2">이름</label>
+                    <input type="text" id="user-name" class="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none transition" placeholder="홍길동">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-500 uppercase mb-2">사번</label>
+                    <input type="text" id="employee-id" class="w-full px-5 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:outline-none transition" placeholder="A12345">
+                </div>
+            </div>
+
+            <div class="mt-8 flex gap-3">
+                <button onclick="closeModal()" class="flex-1 py-4 bg-slate-100 text-slate-600 font-bold rounded-2xl hover:bg-slate-200 transition">취소</button>
+                <button onclick="confirmReservation()" class="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl hover:bg-blue-700 shadow-lg shadow-blue-500/30 transition">예약하기</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedSeatId = null;
+
+        async function fetchSeats() {
+            try {
+                const response = await fetch('/seats');
+                const seats = await response.json();
+                updateStats(seats);
+                renderSeats(seats);
+            } catch (error) {
+                console.error('좌석 정보를 불러오는데 실패했습니다:', error);
+            }
+        }
+
+        function updateStats(seats) {
+            const now = new Date();
+            const available = seats.filter(s => !s.is_reserved).length;
+            // 예시로 만료 1시간 전인 자리를 '곧 비움'으로 표시
+            const expiring = seats.filter(s => {
+                if (!s.is_reserved || !s.expires_at) return false;
+                const expiry = new Date(s.expires_at);
+                const diffHours = (expiry - now) / (1000 * 60 * 60);
+                return diffHours > 0 && diffHours < 1; 
+            }).length;
+
+            document.getElementById('total-count').innerText = seats.length;
+            document.getElementById('available-count').innerText = available;
+            document.getElementById('expiring-count').innerText = expiring;
+        }
+
+        function renderSeats(seats) {
+            const grid = document.getElementById('seat-grid');
+            grid.innerHTML = '';
+
+            const now = new Date();
+
+            seats.forEach(seat => {
+                const isReserved = seat.is_reserved;
+                const expiry = seat.expires_at ? new Date(seat.expires_at) : null;
+                const isExpiringSoon = isReserved && expiry && (expiry - now) > 0 && (expiry - now) < (1000 * 60 * 60);
+
+                const seatCard = document.createElement('div');
+                seatCard.className = `seat-card bg-white rounded-3xl p-6 border-2 flex flex-col justify-between h-48 shadow-sm ${
+                    isReserved 
+                        ? (isExpiringSoon ? 'border-orange-200 bg-orange-50/30' : 'border-slate-100 bg-slate-50/50 opacity-80') 
+                        : 'border-blue-100 hover:border-blue-500 cursor-pointer'
+                }`;
+
+                let statusHtml = '';
+                if (!isReserved) {
+                    statusHtml = `<span class="status-badge bg-blue-100 text-blue-600">이용 가능</span>`;
+                } else if (isExpiringSoon) {
+                    statusHtml = `<span class="status-badge bg-orange-100 text-orange-600 animate-pulse text-[9px]">곧 비움 (1시간 내)</span>`;
+                } else {
+                    statusHtml = `<span class="status-badge bg-slate-200 text-slate-500">사용 중</span>`;
+                }
+
+                seatCard.innerHTML = `
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">${seat.seat_number}</p>
+                            ${statusHtml}
+                        </div>
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${isReserved ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-600'}">
+                            <i class="fas fa-desktop"></i>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-auto">
+                        ${isReserved ? `
+                            <p class="text-sm font-bold text-slate-800">${seat.reserved_by}</p>
+                            <p class="text-[10px] text-slate-400">${seat.employee_id} | ${new Date(seat.reserved_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                            <button onclick="cancelReservation(${seat.id})" class="mt-3 text-[10px] font-bold text-red-400 hover:text-red-600 uppercase tracking-tighter">예약 취소</button>
+                        ` : `
+                            <button onclick="openReserveModal(${seat.id}, '${seat.seat_number}')" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700 transition shadow-lg shadow-blue-500/20">
+                                예약하기
+                            </button>
+                        `}
+                    </div>
+                `;
+
+                if (!isReserved) {
+                    seatCard.onclick = (e) => {
+                        if (e.target.tagName !== 'BUTTON') openReserveModal(seat.id, seat.seat_number);
+                    };
+                }
+                grid.appendChild(seatCard);
+            });
+        }
+
+        function openReserveModal(id, num) {
+            selectedSeatId = id;
+            document.getElementById('modal-title').innerText = `${num} 예약`;
+            document.getElementById('reserve-modal').classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('reserve-modal').classList.add('hidden');
+            document.getElementById('user-name').value = '';
+            document.getElementById('employee-id').value = '';
+            selectedSeatId = null;
+        }
+
+        async function confirmReservation() {
+            const name = document.getElementById('user-name').value.trim();
+            const empId = document.getElementById('employee-id').value.trim();
+            
+            if (!name || !empId) return alert('이름과 사번을 모두 입력해주세요.');
+
+            try {
+                const response = await fetch(`/reserve/${selectedSeatId}?user_name=${encodeURIComponent(name)}&employee_id=${encodeURIComponent(empId)}`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    alert('예약이 완료되었습니다!');
+                    closeModal();
+                    fetchSeats();
+                } else {
+                    const data = await response.json();
+                    alert(data.detail);
+                }
+            } catch (error) {
+                alert('예약 중 오류가 발생했습니다.');
+            }
+        }
+
+        async function cancelReservation(seatId) {
+            if (!confirm('예약을 취소하시겠습니까?')) return;
+            try {
+                const response = await fetch(`/cancel/${seatId}`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    fetchSeats();
+                }
+            } catch (error) {
+                alert('취소 중 오류가 발생했습니다.');
+            }
+        }
+
+        fetchSeats();
+        setInterval(fetchSeats, 30000);
+    </script>
+</body>
+</html>

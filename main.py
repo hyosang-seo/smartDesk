@@ -51,7 +51,7 @@ def get_seats(db: Session = Depends(get_db)):
     
     seats = db.query(models.Seat).options(
         joinedload(models.Seat.reservations)
-    ).all()
+    ).order_by(models.Seat.seat_number).all()
     
     # 각 좌석별로 현재 시각 기준 예약 상태를 계산하여 반환
     now = datetime.datetime.now()

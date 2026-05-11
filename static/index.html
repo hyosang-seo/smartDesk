@@ -50,6 +50,9 @@
         </div>
     </div>
 
+    <!-- 알림 토스트 컨테이너 -->
+    <div id="notification-container" class="fixed top-6 right-6 z-[100] space-y-3 pointer-events-none"></div>
+
     <!-- 예약 모달 -->
     <div id="reserve-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
         <div class="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl transform transition-all scale-100">
@@ -91,14 +94,60 @@
         </div>
     </div>
 
+    <!-- 메시지 모달 -->
+    <div id="message-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl transform transition-all scale-100 flex flex-col max-h-[85vh]">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 id="msg-modal-title" class="text-2xl font-bold text-slate-800">좌석 메시지</h2>
+                    <p class="text-slate-500 text-sm mt-1">좌석에 메모를 남기거나 확인하세요.</p>
+                </div>
+                <button onclick="closeMsgModal()" class="text-slate-400 hover:text-slate-600">
+                    <i class="fas fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <!-- 메시지 리스트 -->
+            <div id="message-list" class="flex-1 overflow-y-auto space-y-4 mb-6 pr-2 min-h-[150px]">
+                <!-- 메시지 아이템들 -->
+            </div>
+
+            <!-- 메시지 입력 -->
+            <div class="space-y-4 border-t pt-6">
+                <div class="grid grid-cols-3 gap-2">
+                    <input type="text" id="msg-sender" class="col-span-1 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-sm" placeholder="이름">
+                    <input type="text" id="msg-content" class="col-span-2 px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-blue-500 text-sm" placeholder="메시지 내용">
+                </div>
+                <button onclick="sendMessage()" class="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-500/20">보내기</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let selectedSeatId = null;
+        let maxSeenMessageId = 0;
+        let isFirstLoad = true;
 
         async function fetchSeats() {
             try {
                 const response = await fetch('/seats');
                 let seats = await response.json();
                 
+                // 새로운 메시지 체크 및 알림
+                seats.forEach(seat => {
+                    if (seat.messages) {
+                        seat.messages.forEach(msg => {
+                            if (msg.id > maxSeenMessageId) {
+                                if (!isFirstLoad) {
+                                    showToast(`${seat.seat_number} 새로운 메시지`, `${msg.sender_name}: ${msg.content}`);
+                                }
+                                maxSeenMessageId = Math.max(maxSeenMessageId, msg.id);
+                            }
+                        });
+                    }
+                });
+                isFirstLoad = false;
+
                 // 번호순으로 정렬 (01번, 02번...)
                 seats.sort((a, b) => a.seat_number.localeCompare(b.seat_number));
                 
@@ -107,6 +156,35 @@
             } catch (error) {
                 console.error('좌석 정보를 불러오는데 실패했습니다:', error);
             }
+        }
+
+        function showToast(title, message) {
+            const container = document.getElementById('notification-container');
+            const toast = document.createElement('div');
+            toast.className = 'pointer-events-auto bg-white border-l-4 border-blue-500 shadow-2xl rounded-xl p-4 flex items-start gap-4 transform transition-all duration-500 translate-x-full min-w-[300px] max-w-sm';
+            toast.innerHTML = `
+                <div class="bg-blue-50 text-blue-500 w-10 h-10 rounded-full flex items-center justify-center shrink-0">
+                    <i class="far fa-comment-dots"></i>
+                </div>
+                <div class="flex-1">
+                    <p class="text-xs font-bold text-slate-800 uppercase tracking-tight">${title}</p>
+                    <p class="text-sm text-slate-500 mt-1 line-clamp-2">${message}</p>
+                </div>
+                <button onclick="this.parentElement.remove()" class="text-slate-300 hover:text-slate-500">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            container.appendChild(toast);
+            
+            // 애니메이션
+            setTimeout(() => toast.classList.remove('translate-x-full'), 10);
+            
+            // 5초 후 자동 삭제
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 500);
+            }, 5000);
         }
 
         function updateStats(seats) {
@@ -136,7 +214,7 @@
                 const isExpiringSoon = isReserved && expiry && (expiry - now) > 0 && (expiry - now) < (1000 * 60 * 60);
 
                 const seatCard = document.createElement('div');
-                seatCard.className = `seat-card bg-white rounded-3xl p-6 border-2 flex flex-col justify-between h-48 shadow-sm ${
+                seatCard.className = `seat-card relative bg-white rounded-3xl p-6 border-2 flex flex-col justify-between h-48 shadow-sm ${
                     isReserved 
                         ? (isExpiringSoon ? 'border-orange-200 bg-orange-50/30' : 'border-slate-100 bg-slate-50/50 opacity-80') 
                         : 'border-blue-100 hover:border-blue-500 cursor-pointer'
@@ -151,14 +229,23 @@
                     statusHtml = `<span class="status-badge bg-slate-200 text-slate-500">사용 중</span>`;
                 }
 
+                const msgCount = seat.messages ? seat.messages.length : 0;
+                const msgBadge = msgCount > 0 ? `<div class="absolute -top-2 -right-2 bg-blue-500 text-white text-[10px] w-6 h-6 rounded-full flex items-center justify-center border-2 border-white font-bold shadow-sm z-10">${msgCount}</div>` : '';
+
                 seatCard.innerHTML = `
+                    ${msgBadge}
                     <div class="flex justify-between items-start">
                         <div>
                             <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">${seat.seat_number}</p>
                             ${statusHtml}
                         </div>
-                        <div class="w-10 h-10 rounded-full flex items-center justify-center ${isReserved ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-600'}">
-                            <i class="fas fa-desktop"></i>
+                        <div class="flex gap-2">
+                            <button onclick="openMessageModal(${seat.id}, '${seat.seat_number}', ${JSON.stringify(seat.messages).replace(/"/g, '&quot;')})" class="w-9 h-9 rounded-full flex items-center justify-center bg-slate-50 text-slate-400 hover:bg-blue-50 hover:text-blue-500 transition border border-slate-100">
+                                <i class="far fa-comment-dots text-sm"></i>
+                            </button>
+                            <div class="w-9 h-9 rounded-full flex items-center justify-center ${isReserved ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-600'} border border-transparent">
+                                <i class="fas fa-desktop text-sm"></i>
+                            </div>
                         </div>
                     </div>
                     
@@ -177,7 +264,7 @@
 
                 if (!isReserved) {
                     seatCard.onclick = (e) => {
-                        if (e.target.tagName !== 'BUTTON') openReserveModal(seat.id, seat.seat_number);
+                        if (!e.target.closest('button')) openReserveModal(seat.id, seat.seat_number);
                     };
                 }
                 grid.appendChild(seatCard);
@@ -188,11 +275,9 @@
             selectedSeatId = id;
             document.getElementById('modal-title').innerText = `${num} 예약`;
             
-            // 현재 시간과 8시간 후 시간을 기본값으로 설정
             const now = new Date();
             const eightHoursLater = new Date(now.getTime() + 8 * 60 * 60 * 1000);
             
-            // datetime-local 형식 (YYYY-MM-DDTHH:mm)으로 변환
             const formatDate = (date) => {
                 const tzOffset = date.getTimezoneOffset() * 60000;
                 return new Date(date - tzOffset).toISOString().slice(0, 16);
@@ -209,6 +294,88 @@
             document.getElementById('user-name').value = '';
             document.getElementById('employee-id').value = '';
             selectedSeatId = null;
+        }
+
+        function openMessageModal(id, num, messages) {
+            selectedSeatId = id;
+            document.getElementById('msg-modal-title').innerText = `${num} 메시지`;
+            renderMessages(messages);
+            document.getElementById('message-modal').classList.remove('hidden');
+        }
+
+        function closeMsgModal() {
+            document.getElementById('message-modal').classList.add('hidden');
+            document.getElementById('msg-sender').value = '';
+            document.getElementById('msg-content').value = '';
+            selectedSeatId = null;
+        }
+
+        function renderMessages(messages) {
+            const list = document.getElementById('message-list');
+            list.innerHTML = '';
+            if (!messages || messages.length === 0) {
+                list.innerHTML = `<div class="text-center py-10 text-slate-400 text-sm italic">남겨진 메시지가 없습니다.</div>`;
+                return;
+            }
+
+            messages.forEach(msg => {
+                const item = document.createElement('div');
+                item.className = 'bg-slate-50 p-4 rounded-2xl relative group border border-slate-100';
+                item.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <span class="text-xs font-bold text-blue-600">${msg.sender_name}</span>
+                        <span class="text-[10px] text-slate-400">${new Date(msg.created_at).toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>
+                    </div>
+                    <p class="text-sm text-slate-700 leading-relaxed">${msg.content}</p>
+                    <button onclick="deleteMessage(${msg.id})" class="absolute top-2 right-2 text-slate-300 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
+                        <i class="fas fa-trash-alt text-[10px]"></i>
+                    </button>
+                `;
+                list.appendChild(item);
+            });
+        }
+
+        async function sendMessage() {
+            const sender = document.getElementById('msg-sender').value.trim();
+            const content = document.getElementById('msg-content').value.trim();
+            
+            if (!sender || !content) return alert('이름과 내용을 입력해주세요.');
+
+            try {
+                const response = await fetch(`/seats/${selectedSeatId}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sender_name: sender, content: content })
+                });
+                if (response.ok) {
+                    document.getElementById('msg-content').value = '';
+                    const res = await fetch('/seats');
+                    const seats = await res.json();
+                    const currentSeat = seats.find(s => s.id === selectedSeatId);
+                    renderMessages(currentSeat.messages);
+                    renderSeats(seats);
+                }
+            } catch (error) {
+                alert('메시지 전송 중 오류가 발생했습니다.');
+            }
+        }
+
+        async function deleteMessage(msgId) {
+            if (!confirm('메시지를 삭제하시겠습니까?')) return;
+            try {
+                const response = await fetch(`/messages/${msgId}`, {
+                    method: 'DELETE'
+                });
+                if (response.ok) {
+                    const res = await fetch('/seats');
+                    const seats = await res.json();
+                    const currentSeat = seats.find(s => s.id === selectedSeatId);
+                    renderMessages(currentSeat.messages);
+                    renderSeats(seats);
+                }
+            } catch (error) {
+                alert('메시지 삭제 중 오류가 발생했습니다.');
+            }
         }
 
         async function confirmReservation() {

@@ -11,6 +11,8 @@ class Seat(Base):
     
     # 해당 좌석의 모든 예약들
     reservations = relationship("Reservation", back_populates="seat")
+    # 해당 좌석에 남겨진 메시지들
+    messages = relationship("Message", back_populates="seat")
 
 class Reservation(Base):
     __tablename__ = "reservations"
@@ -24,3 +26,14 @@ class Reservation(Base):
     created_at = Column(DateTime, default=datetime.datetime.now)
 
     seat = relationship("Seat", back_populates="reservations")
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    seat_id = Column(Integer, ForeignKey("seats.id"))
+    sender_name = Column(String(50))
+    content = Column(String(200))
+    created_at = Column(DateTime, default=datetime.datetime.now)
+
+    seat = relationship("Seat", back_populates="messages")

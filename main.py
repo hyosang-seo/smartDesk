@@ -29,6 +29,10 @@ class ReservationCreate(BaseModel):
     start_time: datetime.datetime
     end_time: datetime.datetime
 
+class MessageCreate(BaseModel):
+    sender_name: str
+    content: str
+
 def init_seats():
     db = database.SessionLocal()
     if db.query(models.Seat).count() == 0:
@@ -44,16 +48,11 @@ def startup_event():
 
 @app.get("/seats")
 def get_seats(db: Session = Depends(get_db)):
-    # 오늘 날짜의 예약들만 가져오기 위해 필터링하거나, 전체를 가져와서 프론트에서 처리
-    # 여기서는 성능을 위해 오늘 날짜 기준 예약을 포함하여 가져옴
-    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_end = today_start + datetime.timedelta(days=1)
-    
     seats = db.query(models.Seat).options(
-        joinedload(models.Seat.reservations)
+        joinedload(models.Seat.reservations),
+        joinedload(models.Seat.messages)
     ).order_by(models.Seat.seat_number).all()
     
-    # 각 좌석별로 현재 시각 기준 예약 상태를 계산하여 반환
     now = datetime.datetime.now()
     result = []
     for seat in seats:
@@ -62,22 +61,20 @@ def get_seats(db: Session = Depends(get_db)):
             "id": seat.id,
             "seat_number": seat.seat_number,
             "current_reservation": active_res,
-            "all_reservations": sorted(seat.reservations, key=lambda x: x.start_time)
+            "all_reservations": sorted(seat.reservations, key=lambda x: x.start_time),
+            "messages": sorted(seat.messages, key=lambda x: x.created_at, reverse=True)
         })
     return result
 
 @app.post("/reserve/{seat_id}")
 def reserve_seat(seat_id: int, res_data: ReservationCreate, db: Session = Depends(get_db)):
-    # 1. 좌석 존재 확인
     seat = db.query(models.Seat).filter(models.Seat.id == seat_id).first()
     if not seat:
         raise HTTPException(status_code=404, detail="좌석을 찾을 수 없습니다.")
     
-    # 2. 시간 유효성 확인
     if res_data.start_time >= res_data.end_time:
         raise HTTPException(status_code=400, detail="시작 시간은 종료 시간보다 빨라야 합니다.")
     
-    # 3. 중복 예약(오버랩) 확인
     overlap = db.query(models.Reservation).filter(
         models.Reservation.seat_id == seat_id,
         models.Reservation.start_time < res_data.end_time,
@@ -87,7 +84,6 @@ def reserve_seat(seat_id: int, res_data: ReservationCreate, db: Session = Depend
     if overlap:
         raise HTTPException(status_code=400, detail=f"해당 시간대({overlap.start_time.strftime('%H:%M')}~{overlap.end_time.strftime('%H:%M')})에 이미 예약이 있습니다.")
 
-    # 4. 예약 생성
     new_res = models.Reservation(
         seat_id=seat_id,
         user_name=res_data.user_name,
@@ -108,6 +104,26 @@ def cancel_reservation(res_id: int, db: Session = Depends(get_db)):
     db.delete(res)
     db.commit()
     return {"message": "예약 취소 완료"}
+
+@app.post("/seats/{seat_id}/messages")
+def post_message(seat_id: int, msg_data: MessageCreate, db: Session = Depends(get_db)):
+    new_msg = models.Message(
+        seat_id=seat_id,
+        sender_name=msg_data.sender_name,
+        content=msg_data.content
+    )
+    db.add(new_msg)
+    db.commit()
+    return new_msg
+
+@app.delete("/messages/{message_id}")
+def delete_message(message_id: int, db: Session = Depends(get_db)):
+    msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="메시지를 찾을 수 없습니다.")
+    db.delete(msg)
+    db.commit()
+    return {"message": "메시지 삭제 완료"}
 
 @app.get("/")
 def read_index():

@@ -96,12 +96,11 @@
         }
 
         function updateStats(seats) {
-            const now = new Date();
-            const available = seats.filter(s => !s.is_reserved).length;
-            // 예시로 만료 1시간 전인 자리를 '곧 비움'으로 표시
+            const available = seats.filter(s => !s.current_reservation).length;
             const expiring = seats.filter(s => {
-                if (!s.is_reserved || !s.expires_at) return false;
-                const expiry = new Date(s.expires_at);
+                if (!s.current_reservation) return false;
+                const expiry = new Date(s.current_reservation.end_time);
+                const now = new Date();
                 const diffHours = (expiry - now) / (1000 * 60 * 60);
                 return diffHours > 0 && diffHours < 1; 
             }).length;
@@ -114,12 +113,12 @@
         function renderSeats(seats) {
             const grid = document.getElementById('seat-grid');
             grid.innerHTML = '';
-
             const now = new Date();
 
             seats.forEach(seat => {
-                const isReserved = seat.is_reserved;
-                const expiry = seat.expires_at ? new Date(seat.expires_at) : null;
+                const activeRes = seat.current_reservation;
+                const isReserved = !!activeRes;
+                const expiry = activeRes ? new Date(activeRes.end_time) : null;
                 const isExpiringSoon = isReserved && expiry && (expiry - now) > 0 && (expiry - now) < (1000 * 60 * 60);
 
                 const seatCard = document.createElement('div');
@@ -151,9 +150,9 @@
                     
                     <div class="mt-auto">
                         ${isReserved ? `
-                            <p class="text-sm font-bold text-slate-800">${seat.reserved_by}</p>
-                            <p class="text-[10px] text-slate-400">${seat.employee_id} | ${new Date(seat.reserved_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
-                            <button onclick="cancelReservation(${seat.id})" class="mt-3 text-[10px] font-bold text-red-400 hover:text-red-600 uppercase tracking-tighter">예약 취소</button>
+                            <p class="text-sm font-bold text-slate-800">${activeRes.user_name}</p>
+                            <p class="text-[10px] text-slate-400">${activeRes.employee_id} | ${new Date(activeRes.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                            <button onclick="cancelReservation(${activeRes.id})" class="mt-3 text-[10px] font-bold text-red-400 hover:text-red-600 uppercase tracking-tighter">예약 취소</button>
                         ` : `
                             <button onclick="openReserveModal(${seat.id}, '${seat.seat_number}')" class="w-full py-3 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700 transition shadow-lg shadow-blue-500/20">
                                 예약하기
@@ -190,9 +189,19 @@
             
             if (!name || !empId) return alert('이름과 사번을 모두 입력해주세요.');
 
+            const startTime = new Date().toISOString();
+            const endTime = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).toISOString();
+
             try {
-                const response = await fetch(`/reserve/${selectedSeatId}?user_name=${encodeURIComponent(name)}&employee_id=${encodeURIComponent(empId)}`, {
-                    method: 'POST'
+                const response = await fetch(`/reserve/${selectedSeatId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_name: name,
+                        employee_id: empId,
+                        start_time: startTime,
+                        end_time: endTime
+                    })
                 });
                 if (response.ok) {
                     alert('예약이 완료되었습니다!');
@@ -200,18 +209,18 @@
                     fetchSeats();
                 } else {
                     const data = await response.json();
-                    alert(data.detail);
+                    alert(data.detail || '예약 실패');
                 }
             } catch (error) {
                 alert('예약 중 오류가 발생했습니다.');
             }
         }
 
-        async function cancelReservation(seatId) {
+        async function cancelReservation(resId) {
             if (!confirm('예약을 취소하시겠습니까?')) return;
             try {
-                const response = await fetch(`/cancel/${seatId}`, {
-                    method: 'POST'
+                const response = await fetch(`/reservations/${resId}`, {
+                    method: 'DELETE'
                 });
                 if (response.ok) {
                     fetchSeats();

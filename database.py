@@ -1,4 +1,5 @@
 import os
+import certifi
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -13,10 +14,17 @@ DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "3306")
 DB_NAME = os.getenv("DB_NAME", "seat_db")
 
-# TiDB Cloud는 SSL 연결이 필요할 수 있으므로 설정을 추가합니다.
+# TiDB Cloud는 SSL 연결이 필수입니다.
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 
-engine = create_engine(DATABASE_URL)
+connect_args = {}
+# TiDB Cloud (Serverless 등) 환경인 경우 SSL 설정 추가
+if "tidb.cloud" in DB_HOST:
+    connect_args["ssl"] = {
+        "ca": certifi.where()
+    }
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 

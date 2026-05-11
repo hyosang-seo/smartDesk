@@ -18,8 +18,8 @@ DB_NAME = os.getenv("DB_NAME", "seat_db")
 DATABASE_URL = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
 
 connect_args = {}
-# TiDB Cloud (Serverless 등) 환경인 경우 SSL 설정 추가
-if "tidb.cloud" in DB_HOST:
+# TiDB Cloud (tidbcloud.com) 환경이거나 localhost가 아닌 경우 SSL 적용 시도
+if "tidbcloud.com" in DB_HOST or DB_HOST != "localhost":
     connect_args["ssl"] = {
         "ca": certifi.where()
     }

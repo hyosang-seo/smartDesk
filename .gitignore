@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Databases
+mysql_data/
+
+# Environment variables (중요!)
+.env
+
+# Docker
+.docker/
+
+# IDEs
+.vscode/
+.idea/
